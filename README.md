@@ -1,8 +1,10 @@
 # SAP Field Service — BAPI Integration Catalogue
 
+[![tests](https://github.com/roopagager/sap-field-service-bapi-catalogue/actions/workflows/tests.yml/badge.svg)](https://github.com/roopagager/sap-field-service-bapi-catalogue/actions/workflows/tests.yml)
+
 Five SAP BAPIs that automate one field-service job end to end in **SAP ECC / S/4HANA Plant Maintenance (PM) and Customer Service (CS)**, written as an integration catalogue for an AI agent or integration layer.
 
-A reference design by Roopa Gager, not tied to any client.
+A reference design by Roopa Gager, not tied to any client, with a **runnable demo** of three of the five BAPIs (below).
 
 ## How the five fit one job
 
@@ -15,6 +17,38 @@ Job done       ─► FS-03 confirm work order operation
 ```
 
 Read BAPIs (FS-02, FS-05) are safe for an agent to call freely. Write BAPIs (FS-01, FS-03, FS-04) need a commit, an idempotency check and, for anything with cost or finality, a human approval step.
+
+## Runnable demo
+
+`bapi_demo/` implements FS-02 (read equipment), FS-05 (parts availability) and FS-04 (create notification) against an in-memory SAP stand-in whose `call(name, **params)` matches `pyrfc.Connection.call` - so the client code runs unchanged against a real system. It simulates the behaviour the catalogue warns about: RETURN messages instead of exceptions, temporary numbers, and a logical unit of work that persists nothing until `BAPI_TRANSACTION_COMMIT` on the same session.
+
+```bash
+pip install -r requirements.txt
+pytest -q                     # 17 tests
+python -m bapi_demo.demo      # walk one job through the BAPIs
+python -m bapi_demo.server    # MCP server for an AI assistant (stdio)
+```
+
+```text
+$ python -m bapi_demo.demo
+1. Fault reported on equipment 10000002
+   FS-04 notification: CREATED 10000001
+2. Same fault reported again by another engineer
+   FS-04 notification: DUPLICATE - Open notification 10000001 already exists
+3. Triage: read the equipment master
+   FS-02 Lift motor, Building B | Otis Gen2-MRL | plant 1010
+4. Parts: drive belt needed
+   FS-05 plant 1010: available 0 -> can fulfil: False
+   FS-05 plant 2010: available 4 -> can fulfil: True
+5. Bad input from the field app
+   FS-02 refused: BAPI_EQUI_GETDETAIL: Equipment 99999999 does not exist
+
+Committed notifications in SAP: 1
+```
+
+What the tests prove: leading-zero conversion, injection rejected, unknown keys never guessed, CREATE → SAVE → COMMIT order, rollback on error with nothing persisted, nothing persisted without commit, a commit on a different session does nothing, and duplicates refused. The MCP server exposes only the two read tools and the notification tool; work orders and final confirmations stay behind human approval.
+
+To use a real system: `pip install pyrfc` (needs the SAP NW RFC SDK) and pass `pyrfc.Connection(...)` to `FieldServiceClient`. Replace the `Z_OPEN_NOTIFS_FOR_EQUIPMENT` dedupe helper with the customer's notification list BAPI or a released CDS view.
 
 ## 1. Catalogue
 
